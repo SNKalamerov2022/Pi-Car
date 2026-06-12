@@ -1,0 +1,1 @@
+"import os\n\nclass Config:\n    SECRET_KEY = os.environ.get('SECRET_KEY') or 'visual_inspection_secret_key_2026'\n    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///robot_inspection.db'\n    SQLALCHEMY_TRACK_MODIFICATIONS = False\n"
