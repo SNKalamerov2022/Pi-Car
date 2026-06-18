@@ -1,0 +1,1 @@
+"from app import create_app, db\nfrom app.models import Mission\n\napp = create_app()\n\n@app.shell_context_processor\ndef make_shell_context():\n    return {'db': db, 'Mission': Mission}\n\nif __name__ == '__main__':\n    app.run(host='0.0.0.0', port=5000, debug=True)\n"
