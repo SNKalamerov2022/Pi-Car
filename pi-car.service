@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi-Car Visual Inspection Robot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/paperclip/pi-car
+ExecStart=/home/paperclip/pi-car/venv/bin/python3 app.py
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=pi-car
+
+[Install]
+WantedBy=multi-user.target

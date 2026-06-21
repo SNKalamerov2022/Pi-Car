@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Inspection Robot - Register</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080a0f;
+            --card-bg: rgba(16, 20, 30, 0.7);
+            --border-color: rgba(255, 255, 255, 0.05);
+            --primary-glow: #00f0ff;
+            --accent-glow: #ff0055;
+            --text-color: #f1f5f9;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 50% 50%, #161c2d 0%, var(--bg-color) 80%);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Decorative background grids */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.01) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255, 255, 255, 0.01) 1px, transparent 1px);
+            background-size: 40px 40px;
+            top: -50%;
+            left: -50%;
+            transform: rotate(5deg);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 420px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 40px;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5),
+                        0 0 40px rgba(0, 240, 255, 0.05);
+            z-index: 2;
+            position: relative;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .logo-area {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: 3px;
+            background: linear-gradient(to right, #00f0ff, #ff0055);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .form-control {
+            width: 100%;
+            background: rgba(8, 10, 15, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-family: inherit;
+            color: var(--text-color);
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-glow);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+        }
+
+        .btn-submit {
+            width: 100%;
+            background: linear-gradient(135deg, #00f0ff 0%, #7000ff 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 20px rgba(0, 240, 255, 0.2);
+            margin-top: 10px;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(0, 240, 255, 0.35);
+        }
+
+        .btn-submit:active {
+            transform: translateY(1px);
+        }
+
+        .switch-prompt {
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .switch-prompt a {
+            color: var(--primary-glow);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s ease;
+        }
+
+        .switch-prompt a:hover {
+            color: #00b8d4;
+            text-decoration: underline;
+        }
+
+        .alert-error {
+            background: rgba(255, 0, 85, 0.1);
+            border: 1px solid rgba(255, 0, 85, 0.3);
+            color: var(--accent-glow);
+            font-size: 0.8rem;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--primary-glow);
+            font-size: 0.8rem;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        @media screen and (max-width: 480px) {
+            .login-container {
+                padding: 24px 20px;
+                border-radius: 16px;
+                max-width: 90%;
+            }
+            .logo-area {
+                font-size: 1.5rem;
+            }
+            .subtitle {
+                font-size: 0.65rem;
+                margin-bottom: 25px;
+            }
+            .form-control {
+                padding: 12px;
+                font-size: 0.85rem;
+            }
+            .btn-submit {
+                padding: 14px;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-container">
+        <div class="logo-area">Inspector</div>
+        <div class="subtitle">Terminal Registration</div>
+
+        {% if error %}
+            <div class="alert-error">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+            <div class="alert-success">{{ success }}</div>
+        {% endif %}
+
+        <form action="/register" method="POST">
+            <div class="form-group">
+                <label for="username">Operator Name</label>
+                <input type="text" id="username" name="username" class="form-control" placeholder="Choose operator ID..." required autocomplete="off">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Security Code (Password)</label>
+                <input type="password" id="password" name="password" class="form-control" placeholder="Create password..." required>
+            </div>
+
+            <button type="submit" class="btn-submit">Register operator</button>
+        </form>
+
+        <div class="switch-prompt">
+            Already registered? <a href="/login">Authenticate Here</a>
+        </div>
+    </div>
+
+</body>
+</html>
