@@ -32,16 +32,12 @@ python run.py
 The interface is hosted locally at `http://localhost:5000/`.
 
 ### Step 4: Running Input Nodes
-The input camera feeds and sensor publishers can be tested in standalone or ROS2 environments:
+The input camera feed can be tested in standalone or ROS2 environments:
 * **Camera Input Node**: Captures frames from default camera index 0 (generates mock line graphics if no camera is detected):
   ```bash
   python camera_node.py
   ```
-* **Sensor Input Node**: Simulates and monitors left/right wheel encoder ticks and bumper collisions:
-  ```bash
-  python sensor_node.py
-  ```
-Detailed telemetry structure and safety checklists are documented in [input_system.md](file:///c:/Users/Simeon/Desktop/Pi-Car/student_submissions/visual_inspection_robot/input_system.md).
+Detailed telemetry structure and safety checklists are documented in [input_system.md](file:///c:/Users/Simeon/Desktop/Pi-Car/separated_projects/visual_inspection_robot/input_system.md).
 
 ---
 

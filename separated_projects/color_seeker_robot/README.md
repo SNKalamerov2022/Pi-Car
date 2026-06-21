@@ -8,7 +8,7 @@ This package implements an organized, modular Flask application that serves as t
 The console provides high-level monitoring and calibration of the target-seeking vehicle:
 * **Operator Session Management**: Restricts control interface privileges to registered users.
 * **Target Management**: Configures color hue isolation filters (Red, Green, Blue, Yellow).
-* **Telemetry Monitoring**: Renders real-time indicators reflecting the current state (Scanning, Target Spotted, Approaching, Completed, E-Stop) and ultrasonic distance readings.
+* **Telemetry Monitoring**: Renders real-time indicators reflecting the current state (Scanning, Target Spotted, Approaching, Completed, E-Stop).
 * **Database Auditing**: Stores timestamps, search history, and detection metrics.
 
 ---
@@ -32,16 +32,12 @@ python run.py
 The interface is hosted locally at `http://localhost:5001/` (configured on port 5001 to prevent conflict with other console systems).
 
 ### Step 4: Running Input Nodes
-The input camera feeds and sensor publishers can be tested in standalone or ROS2 environments:
+The input camera feed can be tested in standalone or ROS2 environments:
 * **Camera Input Node**: Captures frames from default camera index 0 (generates mock target graphics if no camera is detected):
   ```bash
   python camera_node.py
   ```
-* **Sensor Input Node**: Simulates and monitors ultrasonic distance measurements (cm) and IMU Yaw heading degrees:
-  ```bash
-  python sensor_node.py
-  ```
-Detailed telemetry structure and safety checklists are documented in [input_system.md](file:///c:/Users/Simeon/Desktop/Pi-Car/student_submissions/color_seeker_robot/input_system.md).
+Detailed telemetry structure and safety checklists are documented in [input_system.md](file:///c:/Users/Simeon/Desktop/Pi-Car/separated_projects/color_seeker_robot/input_system.md).
 
 ---
 
