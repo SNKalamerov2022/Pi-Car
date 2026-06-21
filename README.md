@@ -14,9 +14,12 @@ The project is split into two student submissions based on the same hardware cha
 Pi-Car/
 ├── app.py                     # Main Flask server running on the physical robot
 ├── vision_node.py             # OpenCV line-tracking and marker detection node (ROS2 compatible)
-├── test_morph.py              # Auxiliary morphology calibration tool
 ├── templates/                 # Global UI templates for physical robot desk test control
 │   └── index.html
+├── scripts/
+│   └── test_morph.py          # Auxiliary morphology calibration tool
+├── systemd/
+│   └── pi-car.service         # Systemd service deployment file for the Raspberry Pi
 ├── documents/
 │   ├── visual_inspection_robot/  # Deliverables folder for Zadanie 19 (Visual Inspection)
 │   │   ├── app/                  # Flask package (models, forms, routes, templates, assets)
