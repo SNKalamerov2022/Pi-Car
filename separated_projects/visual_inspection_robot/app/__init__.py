@@ -1,1 +1,32 @@
-"from flask import Flask\nfrom flask_sqlalchemy import SQLAlchemy\nfrom config import Config\n\ndb = SQLAlchemy()\n\ndef create_app(config_class=Config):\n    app = Flask(__name__)\n    app.config.from_object(config_class)\n\n    db.init_app(app)\n\n    from app.routes import bp as main_bp\n    app.register_blueprint(main_bp)\n\n    # Database creation & Seeding\n    with app.app_context():\n        db.create_all()\n        \n        # Seed missions table with Zadanie 19 visual inspection loops\n        from app.models import Mission\n        if not Mission.query.first():\n            default_missions = [\n                Mission(name=\"Route Alpha (Full)\", description=\"Follows the outer track, stops at all 3 marked inspection targets, captures verification photos, and parks at the finish zone.\", num_checkpoints=3),\n                Mission(name=\"Short Test Route\", description=\"A rapid single-marker run designed for path-following diagnostics.\", num_checkpoints=1),\n                Mission(name=\"High-Density Loop\", description=\"A slower, high-precision scanning route with 5 inspection targets.\", num_checkpoints=5)\n            ]\n            for m in default_missions:\n                db.session.add(m)\n            db.session.commit()\n\n    return app\n"
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from config import Config
+
+db = SQLAlchemy()
+
+def create_app(config_class=Config):
+    app = Flask(__name__)
+    app.config.from_object(config_class)
+
+    db.init_app(app)
+
+    from app.routes import bp as main_bp
+    app.register_blueprint(main_bp)
+
+    # Database creation & Seeding
+    with app.app_context():
+        db.create_all()
+        
+        # Seed missions table with Zadanie 19 visual inspection loops (Presets)
+        from app.models import Mission
+        # Clear existing to ensure clean re-seeding
+        Mission.query.delete()
+        default_missions = [
+            Mission(name="Preset 1 - Single Object", description="Track path, drive for 2.5s on object detection, photo, then stop.", num_checkpoints=1),
+            Mission(name="Preset 2 - Dual Object", description="First target 2.5s, photo, turn left, drive 1.0s, photo, then stop.", num_checkpoints=2)
+        ]
+        for m in default_missions:
+            db.session.add(m)
+        db.session.commit()
+
+    return app

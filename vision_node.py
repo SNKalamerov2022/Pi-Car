@@ -45,19 +45,24 @@ COLOR_RANGES = {
     ]
 }
 
-# Global Tracker Instance
-tracker = None
-tracker_initialized = False
+# Global Tracker Instances
+tracker1 = None
+tracker1_initialized = False
+tracker2 = None
+tracker2_initialized = False
 
 def reset_crossbar_calibration(force=False):
-    global tracker, tracker_initialized
-    if force or not tracker_initialized:
-        tracker = None
-        tracker_initialized = False
+    global tracker1, tracker1_initialized, tracker2, tracker2_initialized
+    if force or not tracker1_initialized:
+        tracker1 = None
+        tracker1_initialized = False
+        tracker2 = None
+        tracker2_initialized = False
 
 def is_tracker_active():
-    global tracker_initialized
-    return tracker_initialized
+    global tracker1_initialized
+    return tracker1_initialized
+
 
 def process_frame(frame, is_running=False, is_mock=False, click_coords=None, mode="line", target_color=None):
     """
@@ -186,36 +191,53 @@ def process_frame(frame, is_running=False, is_mock=False, click_coords=None, mod
         thresholded = clean_mask
         
         # 5. OpenCV MIL Tracker logic
-        global tracker, tracker_initialized
+        global tracker1, tracker1_initialized, tracker2, tracker2_initialized
         crossbar_detected = False
         bm_y_min, bm_y_max = 9999, -1
         bm_x_min, bm_x_max = 9999, -1
         
-        if click_coords is not None:
-            cx, cy = click_coords
+        if click_coords is not None and isinstance(click_coords, list):
             box_w, box_h = 60, 60
-            init_box = (max(0, cx - box_w//2), max(0, cy - box_h//2), box_w, box_h)
-            try:
-                if hasattr(cv2, 'TrackerMIL_create'):
-                    tracker = cv2.TrackerMIL_create()
-                elif hasattr(cv2, 'TrackerMIL') and hasattr(cv2.TrackerMIL, 'create'):
-                    tracker = cv2.TrackerMIL.create()
-                else:
-                    raise AttributeError("No TrackerMIL builder found in cv2")
-                tracker.init(frame, init_box)
-                tracker_initialized = True
-            except Exception as e:
-                tracker = None
-                tracker_initialized = False
-                print(f"Failed to initialize tracker: {e}")
+            if len(click_coords) >= 1 and not tracker1_initialized:
+                cx, cy = click_coords[0]
+                init_box = (max(0, cx - box_w//2), max(0, cy - box_h//2), box_w, box_h)
+                try:
+                    if hasattr(cv2, 'TrackerMIL_create'):
+                        tracker1 = cv2.TrackerMIL_create()
+                    elif hasattr(cv2, 'TrackerMIL') and hasattr(cv2.TrackerMIL, 'create'):
+                        tracker1 = cv2.TrackerMIL.create()
+                    else:
+                        raise AttributeError("No TrackerMIL builder found in cv2")
+                    tracker1.init(frame, init_box)
+                    tracker1_initialized = True
+                except Exception as e:
+                    tracker1 = None
+                    tracker1_initialized = False
+                    print(f"Failed to initialize tracker1: {e}")
+            if len(click_coords) >= 2 and not tracker2_initialized:
+                cx, cy = click_coords[1]
+                init_box = (max(0, cx - box_w//2), max(0, cy - box_h//2), box_w, box_h)
+                try:
+                    if hasattr(cv2, 'TrackerMIL_create'):
+                        tracker2 = cv2.TrackerMIL_create()
+                    elif hasattr(cv2, 'TrackerMIL') and hasattr(cv2.TrackerMIL, 'create'):
+                        tracker2 = cv2.TrackerMIL.create()
+                    else:
+                        raise AttributeError("No TrackerMIL builder found in cv2")
+                    tracker2.init(frame, init_box)
+                    tracker2_initialized = True
+                except Exception as e:
+                    tracker2 = None
+                    tracker2_initialized = False
+                    print(f"Failed to initialize tracker2: {e}")
             
-        if tracker_initialized and tracker is not None:
+        if tracker1_initialized and tracker1 is not None:
             try:
-                success, bbox = tracker.update(frame)
+                success, bbox = tracker1.update(frame)
             except Exception as e:
                 success = False
-                tracker_initialized = False
-                tracker = None
+                tracker1_initialized = False
+                tracker1 = None
             if success:
                 x, y, w, h = [int(v) for v in bbox]
                 crossbar_detected = True
@@ -224,9 +246,25 @@ def process_frame(frame, is_running=False, is_mock=False, click_coords=None, mod
                 bm_y_min = y
                 bm_y_max = y + h
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 255), 3)
+                cv2.putText(frame, "TARGET 1", (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
             else:
-                cv2.putText(frame, "TARGET LOST", (50, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                cv2.putText(frame, "TARGET 1 LOST", (50, 50), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            
+        if tracker2_initialized and tracker2 is not None:
+            try:
+                success2, bbox2 = tracker2.update(frame)
+            except Exception as e:
+                success2 = False
+                tracker2_initialized = False
+                tracker2 = None
+            if success2:
+                x, y, w, h = [int(v) for v in bbox2]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 255), 3)
+                cv2.putText(frame, "TARGET 2", (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            else:
+                cv2.putText(frame, "TARGET 2 LOST", (50, 80), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
             # Autonomous crossbar detection using row sum density
             if is_running:

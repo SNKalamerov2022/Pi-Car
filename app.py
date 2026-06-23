@@ -117,18 +117,18 @@ def init_db():
         )
     ''')
     
-    # Seed default missions
+    # Clear and seed default missions (Presets)
+    cursor.execute('DELETE FROM missions')
     default_missions = [
-        ("Full Path Inspection", "Follow the main line, stop at all markers, capture targets, and park in the finish zone.", 45, 3),
-        ("Short Test Loop", "A rapid 1-checkpoint run designed for quick hardware checks.", 35, 1),
-        ("Diagnostics Route", "A slower, high-precision inspection run with 5 checkpoints.", 30, 5)
+        ("Preset 1 - Single Object", "Track path, drive for 2.5s on object detection, photo, then stop.", 40, 1),
+        ("Preset 2 - Dual Object", "First target 2.5s, photo, turn left, drive 1.0s, photo, then stop.", 40, 2)
     ]
     for name, desc, speed, cp in default_missions:
         try:
             cursor.execute('INSERT INTO missions (name, description, max_speed, num_checkpoints) VALUES (?, ?, ?, ?)', 
                            (name, desc, speed, cp))
         except sqlite3.IntegrityError:
-            pass # Mission already exists
+            pass
             
     db.commit()
     db.close()
@@ -276,6 +276,22 @@ active_mission_name = "None"
 is_mock_sensor_mode = False     # Toggle to simulate markers on desk
 active_mode = "line"            # "line" or "color"
 selected_color = "red"          # "red", "green", "blue", "yellow"
+
+# Multi-Target click list
+clicked_targets = []
+
+# Approach phase timers & flags
+approaching_checkpoint = False
+checkpoint_approach_start = 0.0
+approaching_color = False
+color_approach_start_time = 0.0
+dual_object_phase = None
+dual_object_phase_start = 0.0
+
+# Approach duration configurations
+APPROACH_DURATION = 2.5        # Seconds to drive towards the line obstacle (~30 cm)
+COLOR_APPROACH_DURATION = 2.0  # Seconds to drive towards the color target
+
 
 
 # Helper function to capture a clean frame and save it to the inspection database
@@ -484,20 +500,19 @@ def mission_node_worker():
                 if isinstance(marker_data, tuple) and len(marker_data) == 3:
                     target_visible, bm_y_max, bm_y_min = marker_data
                 
-                if target_visible:
-                    last_seen_target_time = time.time()
-                    target_height = bm_y_max - bm_y_min
-                    
-                    # If target is very close (e.g. bounding box height > 140 pixels)
-                    if target_height > 140:
-                        log_event(f"Target [{selected_color.upper()}] reached (Height: {target_height}px)! Halting robot...", active_run_id)
+                global approaching_color, color_approach_start_time
+                if approaching_color:
+                    # We are in the 2.0s approach phase
+                    if time.time() - color_approach_start_time >= COLOR_APPROACH_DURATION:
+                        approaching_color = False
+                        log_event(f"Color target approach completed ({COLOR_APPROACH_DURATION}s). Halting robot...", active_run_id)
                         mission_state = "COMPLETED"
                         topic_cmd_vel.publish("stop")
                         
                         # Wait for motors to settle and capture photo
                         time.sleep(1.0)
                         capture_inspection_photo(1)
-                        log_event(f"Saved Color Target verification image.", active_run_id)
+                        log_event("Saved Color Target verification image.", active_run_id)
                         
                         # Update database run entry
                         try:
@@ -509,10 +524,16 @@ def mission_node_worker():
                         except Exception as e:
                             print(e)
                 else:
-                    # Target not visible. If it's been lost for more than 1.5 seconds, start rotating to search!
-                    lost_duration = time.time() - last_seen_target_time
-                    if lost_duration > 1.5:
-                        topic_cmd_vel.publish("left")  # Spin to scan the search area
+                    if target_visible:
+                        last_seen_target_time = time.time()
+                        approaching_color = True
+                        color_approach_start_time = time.time()
+                        log_event(f"Color target detected! Commencing {COLOR_APPROACH_DURATION}s approach...", active_run_id)
+                    else:
+                        # Target not visible. If it's been lost for more than 1.5 seconds, start rotating to search!
+                        lost_duration = time.time() - last_seen_target_time
+                        if lost_duration > 1.5:
+                            topic_cmd_vel.publish("left")  # Spin to scan the search area
                         
                 # Mission timeout failsafe (abort if searching/driving for >45s)
                 if time.time() - driving_since > 45.0:
@@ -529,68 +550,32 @@ def mission_node_worker():
                         print(e)
             else:
                 # --- LINE FOLLOWER INSPECTION STATE MACHINE ---
-                marker = False
-                # Read from vision topic or simulate
-                if is_mock_sensor_mode:
-                    if time.time() - mock_timer > 15.0: # Trigger marker simulation every 15 seconds
-                        marker = True
-                        mock_timer = time.time()
-                else:
-                    marker_data = topic_marker_detected.read()
-                    raw_marker = False
-                    bm_y_max = -1
-                    bm_y_min = -1
-                    if isinstance(marker_data, tuple) and len(marker_data) == 3:
-                        raw_marker, bm_y_max, bm_y_min = marker_data
-                    elif marker_data:
-                        raw_marker = bool(marker_data)
-                        
-                    # Require multiple consecutive detections to confirm a real crossbar
-                    if raw_marker:
-                        marker_confirm_count += 1
+                global approaching_checkpoint, checkpoint_approach_start, dual_object_phase, dual_object_phase_start
+                
+                # Check if we are in the dual-object off-line phase
+                if dual_object_phase == "TURNING_LEFT":
+                    # Turning left for 1.0 second
+                    if time.time() - dual_object_phase_start >= 1.0:
+                        log_event("Preset 2: Turn complete. Commencing 1.0s drive towards Object 2...", active_run_id)
+                        dual_object_phase = "DRIVING_SECOND"
+                        dual_object_phase_start = time.time()
+                        topic_cmd_vel.publish("forward")
                     else:
-                        marker_confirm_count = 0
-                    marker = marker_confirm_count >= MARKER_CONFIRM_THRESHOLD
-                    
-                    branch_height = bm_y_max - bm_y_min
-                    if is_tracker_active():
-                        reached_branch = (bm_y_max > 340 or branch_height > 45)
-                    else:
-                        reached_branch = (bm_y_max > 370 or branch_height > 40)
-                    
-                    # TIMER FALLBACK: if driving for too long without visual detection
-                    if not marker and (time.time() - driving_since > DRIVING_TIMEOUT):
-                        marker = True
-                        reached_branch = True
-                        log_event("Timer fallback: auto-checkpoint after 12s of driving.", active_run_id)
-                    
-                # Trigger inspection when marker detected AND reached!
-                if marker and reached_branch and (time.time() - last_marker_time > 5.0):
-                    last_marker_time = time.time()
-                    checkpoints_visited += 1
-                    log_event(f"Checkpoint detected! Visiting checkpoint {checkpoints_visited} of {target_checkpoints}...", active_run_id)
-                    
-                    # Switch state to INSPECTION (halts motor and runs photo capture)
-                    mission_state = "INSPECTION"
-                    global inspection_substate
-                    inspection_substate = "STOPPED FOR INSPECTION"
-                    topic_cmd_vel.publish("stop")
-                    
-                    # Capture and save checkpoint photo
-                    time.sleep(1.0) # wait to settle movement
-                    inspection_substate = "CAPTURING IMAGE"
-                    capture_inspection_photo(checkpoints_visited)
-                    log_event(f"Saved inspection target image for Checkpoint {checkpoints_visited}.", active_run_id)
-                    time.sleep(2.0) # total inspection duration
-                    inspection_substate = None
-                    
-                    # Determine state transitions
-                    if checkpoints_visited >= target_checkpoints:
-                        mission_state = "COMPLETED"
+                        topic_cmd_vel.publish("left")
+                elif dual_object_phase == "DRIVING_SECOND":
+                    # Driving forward for 1.0 second
+                    if time.time() - dual_object_phase_start >= 1.0:
+                        log_event("Preset 2: Reached Object 2. Halting and capturing photo...", active_run_id)
+                        dual_object_phase = None
+                        checkpoints_visited = 2
                         topic_cmd_vel.publish("stop")
-                        log_event("All checkpoints visited. Entering final zone. Mission complete!", active_run_id)
                         
-                        # Update run details in database
+                        time.sleep(1.0)
+                        capture_inspection_photo(2)
+                        log_event("Saved inspection target image for Checkpoint 2.", active_run_id)
+                        
+                        mission_state = "COMPLETED"
+                        log_event("Preset 2 complete!", active_run_id)
                         try:
                             db = get_db()
                             db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
@@ -600,8 +585,70 @@ def mission_node_worker():
                         except Exception as e:
                             print(e)
                     else:
-                        mission_state = "RUNNING"
-                        log_event(f"Checkpoint {checkpoints_visited} complete. Resuming route follow...", active_run_id)
+                        topic_cmd_vel.publish("forward")
+                elif approaching_checkpoint:
+                    # In the 2.5s timed approach phase
+                    if time.time() - checkpoint_approach_start >= APPROACH_DURATION:
+                        approaching_checkpoint = False
+                        checkpoints_visited = 1
+                        log_event(f"Approach complete ({APPROACH_DURATION}s). Halting robot for Checkpoint 1...", active_run_id)
+                        topic_cmd_vel.publish("stop")
+                        
+                        time.sleep(1.0)
+                        capture_inspection_photo(1)
+                        log_event("Saved inspection target image for Checkpoint 1.", active_run_id)
+                        
+                        # Determine if we should transition to Preset 2's second phase or complete Preset 1
+                        if target_checkpoints == 2:
+                            # Preset 2: Start turning left towards the second object
+                            log_event("Preset 2: Commencing 1.0s left turn towards Object 2...", active_run_id)
+                            dual_object_phase = "TURNING_LEFT"
+                            dual_object_phase_start = time.time()
+                            topic_cmd_vel.publish("left")
+                        else:
+                            # Preset 1 (or any other 1-checkpoint run): Complete mission
+                            mission_state = "COMPLETED"
+                            log_event("Preset 1 complete!", active_run_id)
+                            try:
+                                db = get_db()
+                                db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
+                                           ("COMPLETED", active_run_id))
+                                db.commit()
+                                db.close()
+                            except Exception as e:
+                                print(e)
+                else:
+                    # Normal detection mode
+                    marker = False
+                    if is_mock_sensor_mode:
+                        if time.time() - mock_timer > 15.0: # Trigger marker simulation every 15 seconds
+                            marker = True
+                            mock_timer = time.time()
+                    else:
+                        marker_data = topic_marker_detected.read()
+                        raw_marker = False
+                        if isinstance(marker_data, tuple) and len(marker_data) == 3:
+                            raw_marker = marker_data[0]
+                        elif marker_data:
+                            raw_marker = bool(marker_data)
+                            
+                        if raw_marker:
+                            marker_confirm_count += 1
+                        else:
+                            marker_confirm_count = 0
+                        marker = marker_confirm_count >= MARKER_CONFIRM_THRESHOLD
+                        
+                        # TIMER FALLBACK: if driving for too long without visual detection
+                        if not marker and (time.time() - driving_since > DRIVING_TIMEOUT):
+                            marker = True
+                            log_event("Timer fallback: auto-checkpoint after 12s of driving.", active_run_id)
+                            
+                    # Once marker is detected, trigger the timed approach
+                    if marker and (time.time() - last_marker_time > 5.0):
+                        last_marker_time = time.time()
+                        approaching_checkpoint = True
+                        checkpoint_approach_start = time.time()
+                        log_event(f"Target detected! Starting {APPROACH_DURATION}s approach to Checkpoint 1...", active_run_id)
                         mock_timer = time.time() # reset mock timer
                         driving_since = time.time() # reset driving timer for next checkpoint
                         
@@ -616,10 +663,10 @@ def mission_node_worker():
 
 # 4. Control Node (Processes line error and publishes commands to topic_cmd_vel)
 def control_node():
-    global active_mode
+    global active_mode, approaching_checkpoint, dual_object_phase
     log_event("ROS2 Node [control_node] starting...")
     while True:
-        if mission_state == "RUNNING":
+        if mission_state == "RUNNING" and dual_object_phase is None:
             if active_mode == "color":
                 marker_data = topic_marker_detected.read()
                 target_visible = False
@@ -636,14 +683,23 @@ def control_node():
                 abs_error = abs(error)
                 if abs_error < 40:
                     topic_cmd_vel.publish("forward")
-                elif error < 0:
-                    topic_cmd_vel.publish("gentle_left")
+                elif abs_error < 80:
+                    if error < 0:
+                        topic_cmd_vel.publish("gentle_left")
+                    else:
+                        topic_cmd_vel.publish("gentle_right")
                 else:
-                    topic_cmd_vel.publish("gentle_right")
+                    if error < 0:
+                        topic_cmd_vel.publish("left")
+                    else:
+                        topic_cmd_vel.publish("right")
             else:
                 error = topic_line_error.read()
                 if error is None:
-                    topic_cmd_vel.publish("stop")
+                    if approaching_checkpoint:
+                        topic_cmd_vel.publish("forward")
+                    else:
+                        topic_cmd_vel.publish("stop")
                     time.sleep(0.05)
                     continue
                     
@@ -1001,7 +1057,12 @@ def api_mission_start():
     db.close()
     
     log_event(f"Visual Inspection mission [{active_mission_name}] started by user '{session.get('username')}' in mode '{active_mode}'.", active_run_id)
-    
+    global clicked_targets, approaching_checkpoint, approaching_color, dual_object_phase
+    clicked_targets = []
+    topic_tracker_init.publish([])
+    approaching_checkpoint = False
+    approaching_color = False
+    dual_object_phase = None
     reset_crossbar_calibration()
     log_event("Vision crossbar calibration history cleared.", active_run_id)
     mission_state = "PRE_START"
@@ -1059,18 +1120,25 @@ def api_set_mode():
 @app.route('/api/track_init', methods=['POST'])
 @login_required
 def api_track_init():
+    global clicked_targets
     data = request.json
     x = data.get('x')
     y = data.get('y')
     if x is not None and y is not None:
-        topic_tracker_init.publish((int(x), int(y)))
-        log_event(f"Vision System: Click-to-Track initialized at coordinates ({x}, {y})")
-        return jsonify({"status": "success"})
+        clicked_targets.append((int(x), int(y)))
+        if len(clicked_targets) > 2:
+            clicked_targets.pop(0)
+        topic_tracker_init.publish(list(clicked_targets))
+        log_event(f"Vision System: Click-to-Track target added at ({x}, {y}). Total marked: {len(clicked_targets)}/2")
+        return jsonify({"status": "success", "targets_count": len(clicked_targets)})
     return jsonify({"status": "error", "message": "Invalid coordinates"}), 400
 
 @app.route('/api/track_clear', methods=['POST'])
 @login_required
 def api_track_clear():
+    global clicked_targets
+    clicked_targets = []
+    topic_tracker_init.publish([])
     reset_crossbar_calibration(force=True)
     log_event("Vision System: Click-to-Track cleared by operator.")
     return jsonify({"status": "success"})
