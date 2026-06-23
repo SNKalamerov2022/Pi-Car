@@ -289,7 +289,7 @@ dual_object_phase = None
 dual_object_phase_start = 0.0
 
 # Approach duration configurations
-APPROACH_DURATION = 2.5        # Seconds to drive towards the line obstacle (~30 cm)
+APPROACH_DURATION = 0.5 #Seconds to drive towards the line obstacle (~30 cm)
 COLOR_APPROACH_DURATION = 2.0  # Seconds to drive towards the color target
 
 
@@ -422,236 +422,57 @@ def mission_node_worker():
     global mission_state, checkpoints_visited, target_checkpoints, active_run_id, active_mission_name, is_mock_sensor_mode, active_mode, selected_color
     log_event("ROS2 Node [mission_node] starting...")
     
-    last_marker_time = 0
-    mock_timer = time.time()
-    marker_confirm_count = 0
-    MARKER_CONFIRM_THRESHOLD = 3  # Need 3 consecutive positive detections
-    driving_since = time.time()   # Track time since last checkpoint
-    DRIVING_TIMEOUT = 12.0        # Fallback: auto-checkpoint after 12s of driving
     last_mission_state = "IDLE"
-    last_seen_target_time = time.time()
+    drive_start_time = 0.0
     
     while True:
         if mission_state == "PRE_START":
-            if active_mode == "color":
-                log_event(f"Pre-start check: starting Color Search for [{selected_color.upper()}] target...", active_run_id)
-                mission_state = "RUNNING"
-                # Start rotating to scan the environment
-                topic_cmd_vel.publish("left")
-                driving_since = time.time()
-                last_seen_target_time = time.time()
-            else:
-                if is_mock_sensor_mode:
-                    log_event("Pre-start check: Desk Test mode. Bypassing check...", active_run_id)
-                    mission_state = "RUNNING"
-                    topic_cmd_vel.publish("forward")
-                    driving_since = time.time()
-                else:
-                    log_event("Pre-start check: analyzing track for target branch...", active_run_id)
-                    start_check_time = time.time()
-                    confirm_count = 0
-                    detected = False
-                    
-                    while time.time() - start_check_time < 3.0:
-                        marker_data = topic_marker_detected.read()
-                        raw_marker = marker_data[0] if isinstance(marker_data, tuple) else bool(marker_data)
-                        
-                        if raw_marker:
-                            confirm_count += 1
-                        else:
-                            confirm_count = max(0, confirm_count - 1)
-                        
-                        if confirm_count >= 5:
-                            detected = True
-                            break
-                        time.sleep(0.1)
-                        
-                    if detected:
-                        log_event("Pre-start check PASSED: Target branch confirmed. Starting drive sequence...", active_run_id)
-                        mission_state = "RUNNING"
-                        topic_cmd_vel.publish("forward")
-                        driving_since = time.time()
-                    else:
-                        log_event("Pre-start check FAILED: Target branch not detected or unstable. Aborting mission.", active_run_id)
-                        mission_state = "ABORTED"
-                        topic_cmd_vel.publish("stop")
-                        
-            last_mission_state = mission_state
+            log_event(f"Starting simplified timed drive mission: {active_mission_name} in mode: {active_mode}", active_run_id)
+            mission_state = "RUNNING"
+            drive_start_time = time.time()
+            topic_cmd_vel.publish("forward")
+            last_mission_state = "PRE_START"
             time.sleep(0.1)
             continue
             
         if mission_state == "RUNNING":
             if last_mission_state != "RUNNING":
-                # Just entered RUNNING state: reset driving timer and marker filter!
-                driving_since = time.time()
-                mock_timer = time.time()
-                marker_confirm_count = 0
-                last_seen_target_time = time.time()
-                log_event("Mission state transitioned to RUNNING.", active_run_id)
+                # Ensure we reset start time if state was changed elsewhere to RUNNING
+                drive_start_time = time.time()
+                topic_cmd_vel.publish("forward")
+                log_event(f"Mission state transitioned to RUNNING. Mode: {active_mode}. Driving forward.", active_run_id)
             
             last_mission_state = "RUNNING"
             
-            if active_mode == "color":
-                # --- COLOR TARGET SEEKER STATE MACHINE ---
-                marker_data = topic_marker_detected.read()
-                target_visible = False
-                bm_y_max = -1
-                bm_y_min = -1
-                if isinstance(marker_data, tuple) and len(marker_data) == 3:
-                    target_visible, bm_y_max, bm_y_min = marker_data
+            # Keep commanding forward to keep motors rotating
+            topic_cmd_vel.publish("forward")
+            
+            # Determine target duration based on mode
+            target_duration = 1.0 if active_mode == "color" else 2.0
+            
+            elapsed = time.time() - drive_start_time
+            if elapsed >= target_duration:
+                log_event(f"{target_duration} seconds elapsed for mode {active_mode}. Stopping robot...", active_run_id)
+                topic_cmd_vel.publish("stop")
+                time.sleep(1.0)
                 
-                global approaching_color, color_approach_start_time
-                if approaching_color:
-                    # We are in the 2.0s approach phase
-                    if time.time() - color_approach_start_time >= COLOR_APPROACH_DURATION:
-                        approaching_color = False
-                        log_event(f"Color target approach completed ({COLOR_APPROACH_DURATION}s). Halting robot...", active_run_id)
-                        mission_state = "COMPLETED"
-                        topic_cmd_vel.publish("stop")
-                        
-                        # Wait for motors to settle and capture photo
-                        time.sleep(1.0)
-                        capture_inspection_photo(1)
-                        log_event("Saved Color Target verification image.", active_run_id)
-                        
-                        # Update database run entry
-                        try:
-                            db = get_db()
-                            db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
-                                       ("COMPLETED", active_run_id))
-                            db.commit()
-                            db.close()
-                        except Exception as e:
-                            print(e)
-                else:
-                    if target_visible:
-                        last_seen_target_time = time.time()
-                        approaching_color = True
-                        color_approach_start_time = time.time()
-                        log_event(f"Color target detected! Commencing {COLOR_APPROACH_DURATION}s approach...", active_run_id)
-                    else:
-                        # Target not visible. If it's been lost for more than 1.5 seconds, start rotating to search!
-                        lost_duration = time.time() - last_seen_target_time
-                        if lost_duration > 1.5:
-                            topic_cmd_vel.publish("left")  # Spin to scan the search area
-                        
-                # Mission timeout failsafe (abort if searching/driving for >45s)
-                if time.time() - driving_since > 45.0:
-                    log_event("Failsafe timeout: Color target not reached within 45s. Aborting mission.", active_run_id)
-                    mission_state = "ABORTED"
-                    topic_cmd_vel.publish("stop")
-                    try:
-                        db = get_db()
-                        db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
-                                   ("ABORTED", active_run_id))
-                        db.commit()
-                        db.close()
-                    except Exception as e:
-                        print(e)
-            else:
-                # --- LINE FOLLOWER INSPECTION STATE MACHINE ---
-                global approaching_checkpoint, checkpoint_approach_start, dual_object_phase, dual_object_phase_start
+                # Capture verification photo (Checkpoint 1)
+                checkpoints_visited = 1
+                capture_inspection_photo(1)
+                log_event("Verification image captured.", active_run_id)
                 
-                # Check if we are in the dual-object off-line phase
-                if dual_object_phase == "TURNING_LEFT":
-                    # Turning left for 1.0 second
-                    if time.time() - dual_object_phase_start >= 1.0:
-                        log_event("Preset 2: Turn complete. Commencing 1.0s drive towards Object 2...", active_run_id)
-                        dual_object_phase = "DRIVING_SECOND"
-                        dual_object_phase_start = time.time()
-                        topic_cmd_vel.publish("forward")
-                    else:
-                        topic_cmd_vel.publish("left")
-                elif dual_object_phase == "DRIVING_SECOND":
-                    # Driving forward for 1.0 second
-                    if time.time() - dual_object_phase_start >= 1.0:
-                        log_event("Preset 2: Reached Object 2. Halting and capturing photo...", active_run_id)
-                        dual_object_phase = None
-                        checkpoints_visited = 2
-                        topic_cmd_vel.publish("stop")
-                        
-                        time.sleep(1.0)
-                        capture_inspection_photo(2)
-                        log_event("Saved inspection target image for Checkpoint 2.", active_run_id)
-                        
-                        mission_state = "COMPLETED"
-                        log_event("Preset 2 complete!", active_run_id)
-                        try:
-                            db = get_db()
-                            db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
-                                       ("COMPLETED", active_run_id))
-                            db.commit()
-                            db.close()
-                        except Exception as e:
-                            print(e)
-                    else:
-                        topic_cmd_vel.publish("forward")
-                elif approaching_checkpoint:
-                    # In the 2.5s timed approach phase
-                    if time.time() - checkpoint_approach_start >= APPROACH_DURATION:
-                        approaching_checkpoint = False
-                        checkpoints_visited = 1
-                        log_event(f"Approach complete ({APPROACH_DURATION}s). Halting robot for Checkpoint 1...", active_run_id)
-                        topic_cmd_vel.publish("stop")
-                        
-                        time.sleep(1.0)
-                        capture_inspection_photo(1)
-                        log_event("Saved inspection target image for Checkpoint 1.", active_run_id)
-                        
-                        # Determine if we should transition to Preset 2's second phase or complete Preset 1
-                        if target_checkpoints == 2:
-                            # Preset 2: Start turning left towards the second object
-                            log_event("Preset 2: Commencing 1.0s left turn towards Object 2...", active_run_id)
-                            dual_object_phase = "TURNING_LEFT"
-                            dual_object_phase_start = time.time()
-                            topic_cmd_vel.publish("left")
-                        else:
-                            # Preset 1 (or any other 1-checkpoint run): Complete mission
-                            mission_state = "COMPLETED"
-                            log_event("Preset 1 complete!", active_run_id)
-                            try:
-                                db = get_db()
-                                db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
-                                           ("COMPLETED", active_run_id))
-                                db.commit()
-                                db.close()
-                            except Exception as e:
-                                print(e)
-                else:
-                    # Normal detection mode
-                    marker = False
-                    if is_mock_sensor_mode:
-                        if time.time() - mock_timer > 15.0: # Trigger marker simulation every 15 seconds
-                            marker = True
-                            mock_timer = time.time()
-                    else:
-                        marker_data = topic_marker_detected.read()
-                        raw_marker = False
-                        if isinstance(marker_data, tuple) and len(marker_data) == 3:
-                            raw_marker = marker_data[0]
-                        elif marker_data:
-                            raw_marker = bool(marker_data)
-                            
-                        if raw_marker:
-                            marker_confirm_count += 1
-                        else:
-                            marker_confirm_count = 0
-                        marker = marker_confirm_count >= MARKER_CONFIRM_THRESHOLD
-                        
-                        # TIMER FALLBACK: if driving for too long without visual detection
-                        if not marker and (time.time() - driving_since > DRIVING_TIMEOUT):
-                            marker = True
-                            log_event("Timer fallback: auto-checkpoint after 12s of driving.", active_run_id)
-                            
-                    # Once marker is detected, trigger the timed approach
-                    if marker and (time.time() - last_marker_time > 5.0):
-                        last_marker_time = time.time()
-                        approaching_checkpoint = True
-                        checkpoint_approach_start = time.time()
-                        log_event(f"Target detected! Starting {APPROACH_DURATION}s approach to Checkpoint 1...", active_run_id)
-                        mock_timer = time.time() # reset mock timer
-                        driving_since = time.time() # reset driving timer for next checkpoint
-                        
+                mission_state = "COMPLETED"
+                log_event("Mission complete!", active_run_id)
+                
+                # Update database run entry
+                try:
+                    db = get_db()
+                    db.execute('UPDATE mission_history SET end_time = CURRENT_TIMESTAMP, status = ? WHERE run_id = ?', 
+                               ("COMPLETED", active_run_id))
+                    db.commit()
+                    db.close()
+                except Exception as e:
+                    print(f"Error updating DB: {e}")
         else:
             last_mission_state = mission_state
             if mission_state in ["COMPLETED", "ABORTED"]:
@@ -663,78 +484,10 @@ def mission_node_worker():
 
 # 4. Control Node (Processes line error and publishes commands to topic_cmd_vel)
 def control_node():
-    global active_mode, approaching_checkpoint, dual_object_phase
     log_event("ROS2 Node [control_node] starting...")
     while True:
-        if mission_state == "RUNNING" and dual_object_phase is None:
-            if active_mode == "color":
-                marker_data = topic_marker_detected.read()
-                target_visible = False
-                if isinstance(marker_data, tuple) and len(marker_data) == 3:
-                    target_visible, bm_y_max, bm_y_min = marker_data
-                
-                error = topic_line_error.read()
-                if error is None or not target_visible:
-                    # Let mission_node handle the searching/rotation state
-                    time.sleep(0.05)
-                    continue
-                
-                # Target is visible! Guide the motors to center it
-                abs_error = abs(error)
-                if abs_error < 40:
-                    topic_cmd_vel.publish("forward")
-                elif abs_error < 80:
-                    if error < 0:
-                        topic_cmd_vel.publish("gentle_left")
-                    else:
-                        topic_cmd_vel.publish("gentle_right")
-                else:
-                    if error < 0:
-                        topic_cmd_vel.publish("left")
-                    else:
-                        topic_cmd_vel.publish("right")
-            else:
-                error = topic_line_error.read()
-                if error is None:
-                    if approaching_checkpoint:
-                        topic_cmd_vel.publish("forward")
-                    else:
-                        topic_cmd_vel.publish("stop")
-                    time.sleep(0.05)
-                    continue
-                    
-                # Read marker/tracker data to see if tracker is active
-                marker_data = topic_marker_detected.read()
-                tracker_active = False
-                if isinstance(marker_data, tuple) and len(marker_data) == 3:
-                    tracker_active = marker_data[0]
-                    
-                abs_error = abs(error)
-                if tracker_active:
-                    # SMOOTH TARGET TRACKING: no hard pivots to keep camera stable!
-                    if abs_error < 35:
-                        topic_cmd_vel.publish("forward")
-                    elif error < 0:
-                        topic_cmd_vel.publish("gentle_left")
-                    else:
-                        topic_cmd_vel.publish("gentle_right")
-                else:
-                    # Normal line tracking (with recovery pivots)
-                    if abs_error < 25:
-                        topic_cmd_vel.publish("forward")
-                    elif abs_error < 80:
-                        if error < 0:
-                            topic_cmd_vel.publish("gentle_left")
-                        else:
-                            topic_cmd_vel.publish("gentle_right")
-                    else:
-                        if error < 0:
-                            topic_cmd_vel.publish("left")
-                        else:
-                            topic_cmd_vel.publish("right")
-        
-        # If state is stopped/inspection/idle, let mission_node control cmd_vel
-        time.sleep(0.05)
+        # Dormant/disabled for the simplified timed drive
+        time.sleep(0.5)
 
 
 # 5. Motor Node (Listens to topic_cmd_vel and writes to GPIO)
