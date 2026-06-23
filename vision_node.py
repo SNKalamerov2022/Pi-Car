@@ -289,7 +289,7 @@ def process_frame(frame, is_running=False, is_mock=False, click_coords=None, mod
         line_center_x = width // 2
         line_found = False
         
-        if tracker_initialized:
+        if tracker1_initialized:
             if crossbar_detected and bm_x_min != 9999:
                 line_center_x = (bm_x_min + bm_x_max) // 2
                 line_found = True
